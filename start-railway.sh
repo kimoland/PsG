@@ -23,6 +23,7 @@ if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     python -c "
 import asyncio
 import os
+import inspect
 import pkgutil
 import importlib
 
@@ -60,17 +61,18 @@ async def main():
             import hashlib
             get_password_hash = lambda p: hashlib.sha256(p.encode()).hexdigest()
 
-    if asyncio.iscoroutinefunction(get_password_hash):
+    if inspect.iscoroutinefunction(get_password_hash):
         hashed = await get_password_hash(password)
     else:
         hashed = get_password_hash(password)
 
     def apply_owner_permissions(obj):
-        for attr in ['sudo', 'is_sudo', 'is_owner', 'is_superuser']:
-            if hasattr(obj, attr):
-                setattr(obj, attr, True)
+        if hasattr(obj, 'is_sudo'):
+            obj.is_sudo = True
+        if hasattr(obj, 'sudo'):
+            obj.sudo = True
         if hasattr(obj, 'role_id'):
-            setattr(obj, 'role_id', None)
+            obj.role_id = None
 
     async with GetDB() as db:
         try:
@@ -81,7 +83,7 @@ async def main():
                 apply_owner_permissions(existing)
                 db.add(existing)
                 await db.commit()
-                print(f'Admin {username} updated with full Owner permissions!')
+                print(f'Admin {username} successfully updated with full Owner permissions!')
                 return
         except Exception as e:
             print('Check existing admin:', e)
