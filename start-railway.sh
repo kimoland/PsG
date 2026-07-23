@@ -1,48 +1,28 @@
 #!/usr/bin/env bash
 set -e
 
+# پورت و اینترفیس‌های uvicorn
 export UVICORN_HOST="0.0.0.0"
 export UVICORN_PORT="${PORT:-8000}"
 
+# دیتابیس پیش‌فرض sqlite
 export SQLALCHEMY_DATABASE_URL="${SQLALCHEMY_DATABASE_URL:-sqlite+aiosqlite:///db.sqlite3}"
 export ROLE="${ROLE:-all-in-one}"
 
+# هدرهای پروکسی برای تشخیص HTTPS در Railway
 export UVICORN_PROXY_HEADERS="${UVICORN_PROXY_HEADERS:-true}"
 export UVICORN_FORWARDED_ALLOW_IPS="${UVICORN_FORWARDED_ALLOW_IPS:-*}"
 
 echo "Starting PasarGuard panel on port ${UVICORN_PORT}..."
 
+# 1. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
+# 2. ساخت فیزیکی ادمین در دیتابیس توسط CLI رسمی پاسارگاد (بدون نیاز به DEBUG)
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
-    echo "Creating database admin user '${SUDO_USERNAME}'..."
-    python -c "
-import asyncio
-import os
-from passlib.context import CryptContext
-from app.db.base import GetDB
-from app.db.models import Admin
-
-pwd_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
-
-async def init_admin():
-    username = os.environ.get('SUDO_USERNAME')
-    password = os.environ.get('SUDO_PASSWORD')
-    if not username or not password:
-        return
-    hashed = pwd_context.hash(password)
-    async with GetDB() as db:
-        admin = Admin(username=username, hashed_password=hashed, is_sudo=True)
-        db.add(admin)
-        try:
-            await db.commit()
-            print('Admin created successfully in database.')
-        except Exception as e:
-            await db.rollback()
-            print('Admin creation skipped (already exists or DB locked):', e)
-
-asyncio.run(init_admin())
-" || true
+    echo "Creating admin '${SUDO_USERNAME}' via PasarGuard CLI..."
+    pasarguard cli admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || true
 fi
 
+# 3. اجرای پنل
 exec /code/start.sh
