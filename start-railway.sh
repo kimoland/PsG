@@ -17,7 +17,7 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. اسکن زنده ماژول‌های پایتون و هش نیتیو رمز عبور در دیتابیس SQLite
+# ۳. همگام‌سازی و ساخت مستقیم ادمین Sudo در دیتابیس SQLite با هش Async نیتیو
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' password is synced in database..."
     python -c "
@@ -42,7 +42,7 @@ async def main():
     for importer, modname, ispkg in pkgutil.walk_packages(app.__path__, app.__name__ + '.'):
         try:
             mod = importlib.import_module(modname)
-            for attr in ['get_password_hash', 'hash_password', 'get_password_hash_func']:
+            for attr in ['hash_password', 'get_password_hash', 'get_password_hash_func']:
                 if hasattr(mod, attr) and callable(getattr(mod, attr)):
                     get_password_hash = getattr(mod, attr)
                     print(f'Found {attr} in {modname}')
@@ -62,7 +62,10 @@ async def main():
             import hashlib
             get_password_hash = lambda p: hashlib.sha256(p.encode()).hexdigest()
 
-    hashed = get_password_hash(password)
+    if asyncio.iscoroutinefunction(get_password_hash):
+        hashed = await get_password_hash(password)
+    else:
+        hashed = get_password_hash(password)
 
     async with GetDB() as db:
         try:
