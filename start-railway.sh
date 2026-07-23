@@ -17,7 +17,7 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. همگام‌سازی و اعطای دسترسی کامل Owner/Sudo به ادمین اصلی
+# ۳. همگام‌سازی و بررسی دقیق ساختار نقش‌ها در دیتابیس
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full Owner permissions..."
     python -c "
@@ -71,8 +71,6 @@ async def main():
             obj.is_sudo = True
         if hasattr(obj, 'sudo'):
             obj.sudo = True
-        if hasattr(obj, 'role_id'):
-            obj.role_id = None
 
     async with GetDB() as db:
         try:
@@ -83,19 +81,32 @@ async def main():
                 apply_owner_permissions(existing)
                 db.add(existing)
                 await db.commit()
-                print(f'Admin {username} successfully updated with full Owner permissions!')
-                return
-        except Exception as e:
-            print('Check existing admin:', e)
-
-        try:
-            admin_obj = Admin(username=username, hashed_password=hashed)
-            apply_owner_permissions(admin_obj)
-            db.add(admin_obj)
-            await db.commit()
-            print(f'Admin {username} created with full Owner permissions!')
+                print(f'Admin {username} updated!')
+            else:
+                admin_obj = Admin(username=username, hashed_password=hashed)
+                apply_owner_permissions(admin_obj)
+                db.add(admin_obj)
+                await db.commit()
+                print(f'Admin {username} created!')
         except Exception as e:
             print('Create admin error:', e)
+
+        # بررسی و چاپ دقیق ساختار ستون‌های دیتابیس
+        try:
+            from sqlalchemy import text
+            res = await db.execute(text(\"SELECT * FROM admins WHERE username='admin'\"))
+            row = res.fetchone()
+            print('Admin DB Row Columns:', res.keys())
+            print('Admin DB Row Data:', row)
+            
+            try:
+                roles_res = await db.execute(text(\"SELECT * FROM roles\"))
+                print('Roles Table Columns:', roles_res.keys())
+                print('Roles Table Rows:', roles_res.fetchall())
+            except Exception as e:
+                print('No roles table:', e)
+        except Exception as e:
+            print('DB inspect error:', e)
 
 asyncio.run(main())
 " || true
