@@ -57,7 +57,14 @@ async def main():
 
         try:
             hashed = get_password_hash(password) if get_password_hash else password
-            admin_obj = Admin(username=username, hashed_password=hashed, is_sudo=True)
+            try:
+                admin_obj = Admin(username=username, hashed_password=hashed, sudo=True)
+            except Exception:
+                try:
+                    admin_obj = Admin(username=username, hashed_password=hashed, is_sudo=True)
+                except Exception:
+                    admin_obj = Admin(username=username, hashed_password=hashed)
+
             db.add(admin_obj)
             await db.commit()
             print(f'Admin {username} successfully created and saved in database!')
