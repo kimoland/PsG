@@ -17,7 +17,7 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. اسکن و ست کردن کامل دسترسی‌های ادمین
+# ۳. اعطای دسترسی کامل Owner با تنظیم permission_overrides = '["*"]'
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full Owner permissions..."
     python -c "
@@ -73,27 +73,22 @@ async def main():
             admin = await get_admin(db, username=username)
             if admin:
                 admin.hashed_password = hashed
-                print('Admin properties:', [a for a in dir(admin) if not a.startswith('_')])
+                db.add(admin)
+                await db.commit()
             else:
                 admin = Admin(username=username, hashed_password=hashed)
                 db.add(admin)
                 await db.commit()
 
-            # ست کردن role_id = 1 و permission_overrides
-            await db.execute(text(\"UPDATE admins SET role_id = 1, permission_overrides = '*' WHERE username = :u\"), {'u': username})
+            # ست کردن دسترسی مالکیت کامل با فرمت معتبر JSON
+            await db.execute(
+                text('UPDATE admins SET role_id = 1, permission_overrides = \'[\"*\"]\' WHERE username = :u'),
+                {'u': username}
+            )
             await db.commit()
-            print(f'Admin {username} role and permissions updated!')
+            print(f'Admin {username} role and permissions successfully set to Owner!')
         except Exception as e:
             print('Admin permission error:', e)
-
-        # اسکن ماژول‌های نقش در پایتون
-        for importer, modname, ispkg in pkgutil.walk_packages(app.__path__, app.__name__ + '.'):
-            if 'admin' in modname or 'role' in modname or 'permission' in modname:
-                try:
-                    mod = importlib.import_module(modname)
-                    print(f'Module {modname}:', [a for a in dir(mod) if not a.startswith('_')])
-                except Exception:
-                    pass
 
 asyncio.run(main())
 " || true
