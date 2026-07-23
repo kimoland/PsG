@@ -17,12 +17,14 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. همگام‌سازی و ساخت مستقیم ادمین Sudo در دیتابیس SQLite با هش نیتیو
+# ۳. اسکن زنده ماژول‌های پایتون و هش نیتیو رمز عبور در دیتابیس SQLite
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' password is synced in database..."
     python -c "
 import asyncio
 import os
+import pkgutil
+import importlib
 
 async def main():
     username = os.environ.get('SUDO_USERNAME', 'admin')
@@ -36,30 +38,29 @@ async def main():
     from app.db.models import Admin
 
     get_password_hash = None
-    for mod_name in [
-        'app.app.utils.security',
-        'app.utils.security',
-        'app.core.security',
-        'app.security',
-        'app.services.security',
-        'app.auth.security',
-        'app.db.security'
-    ]:
+    import app
+    for importer, modname, ispkg in pkgutil.walk_packages(app.__path__, app.__name__ + '.'):
         try:
-            m = __import__(mod_name, fromlist=['get_password_hash'])
-            func = getattr(m, 'get_password_hash', None)
-            if func:
-                get_password_hash = func
-                print(f'Using get_password_hash from {mod_name}')
+            mod = importlib.import_module(modname)
+            for attr in ['get_password_hash', 'hash_password', 'get_password_hash_func']:
+                if hasattr(mod, attr) and callable(getattr(mod, attr)):
+                    get_password_hash = getattr(mod, attr)
+                    print(f'Found {attr} in {modname}')
+                    break
+            if get_password_hash:
                 break
         except Exception:
             pass
 
     if not get_password_hash:
-        print('Internal get_password_hash not found, using passlib CryptContext')
-        from passlib.context import CryptContext
-        pwd_context = CryptContext(schemes=['argon2', 'bcrypt'], deprecated='auto')
-        get_password_hash = pwd_context.hash
+        print('Using fallback password hashing')
+        try:
+            from pwdlib import PasswordHash
+            pwd_context = PasswordHash.recommended()
+            get_password_hash = pwd_context.hash
+        except Exception:
+            import hashlib
+            get_password_hash = lambda p: hashlib.sha256(p.encode()).hexdigest()
 
     hashed = get_password_hash(password)
 
