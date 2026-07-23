@@ -17,9 +17,9 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. ساخت فیزیکی و مستقیم ادمین Sudo در دیتابیس SQLite
+# ۳. همگام‌سازی و ساخت مستقیم ادمین Sudo در دیتابیس SQLite با هش نیتیو
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
-    echo "Ensuring sudo admin '${SUDO_USERNAME}' exists in database..."
+    echo "Ensuring sudo admin '${SUDO_USERNAME}' password is synced in database..."
     python -c "
 import asyncio
 import os
@@ -36,27 +36,47 @@ async def main():
     from app.db.models import Admin
 
     get_password_hash = None
-    for mod in ['app.security', 'app.core.security', 'app.db.security']:
+    for mod_name in [
+        'app.app.utils.security',
+        'app.utils.security',
+        'app.core.security',
+        'app.security',
+        'app.services.security',
+        'app.auth.security',
+        'app.db.security'
+    ]:
         try:
-            m = __import__(mod, fromlist=['get_password_hash'])
-            get_password_hash = getattr(m, 'get_password_hash', None)
-            if get_password_hash:
+            m = __import__(mod_name, fromlist=['get_password_hash'])
+            func = getattr(m, 'get_password_hash', None)
+            if func:
+                get_password_hash = func
+                print(f'Using get_password_hash from {mod_name}')
                 break
         except Exception:
             pass
+
+    if not get_password_hash:
+        print('Internal get_password_hash not found, using passlib CryptContext')
+        from passlib.context import CryptContext
+        pwd_context = CryptContext(schemes=['argon2', 'bcrypt'], deprecated='auto')
+        get_password_hash = pwd_context.hash
+
+    hashed = get_password_hash(password)
 
     async with GetDB() as db:
         try:
             from app.db.crud.admin import get_admin
             existing = await get_admin(db, username=username)
             if existing:
-                print(f'Admin {username} already exists in database.')
+                existing.hashed_password = hashed
+                db.add(existing)
+                await db.commit()
+                print(f'Admin {username} password successfully updated in database!')
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            print('Check admin existing note:', e)
 
         try:
-            hashed = get_password_hash(password) if get_password_hash else password
             try:
                 admin_obj = Admin(username=username, hashed_password=hashed, sudo=True)
             except Exception:
