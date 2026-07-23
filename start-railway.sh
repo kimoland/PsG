@@ -17,7 +17,7 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. اعطای دسترسی Owner با ست کردن role_id = NULL در SQLite
+# ۳. اسکن و ست کردن کامل دسترسی‌های ادمین
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full Owner permissions..."
     python -c "
@@ -70,24 +70,30 @@ async def main():
     async with GetDB() as db:
         try:
             from app.db.crud.admin import get_admin
-            existing = await get_admin(db, username=username)
-            if existing:
-                existing.hashed_password = hashed
-                existing.role_id = None
-                db.add(existing)
-                await db.commit()
+            admin = await get_admin(db, username=username)
+            if admin:
+                admin.hashed_password = hashed
+                print('Admin properties:', [a for a in dir(admin) if not a.startswith('_')])
             else:
-                admin_obj = Admin(username=username, hashed_password=hashed)
-                admin_obj.role_id = None
-                db.add(admin_obj)
+                admin = Admin(username=username, hashed_password=hashed)
+                db.add(admin)
                 await db.commit()
-            
-            # ست کردن قطعی role_id روی NULL برای مالکیت کامل
-            await db.execute(text(\"UPDATE admins SET role_id = NULL WHERE username = :u\"), {'u': username})
+
+            # ست کردن role_id = 1 و permission_overrides
+            await db.execute(text(\"UPDATE admins SET role_id = 1, permission_overrides = '*' WHERE username = :u\"), {'u': username})
             await db.commit()
-            print(f'Admin {username} updated with role_id = NULL (Owner)!')
+            print(f'Admin {username} role and permissions updated!')
         except Exception as e:
-            print('Create admin error:', e)
+            print('Admin permission error:', e)
+
+        # اسکن ماژول‌های نقش در پایتون
+        for importer, modname, ispkg in pkgutil.walk_packages(app.__path__, app.__name__ + '.'):
+            if 'admin' in modname or 'role' in modname or 'permission' in modname:
+                try:
+                    mod = importlib.import_module(modname)
+                    print(f'Module {modname}:', [a for a in dir(mod) if not a.startswith('_')])
+                except Exception:
+                    pass
 
 asyncio.run(main())
 " || true
