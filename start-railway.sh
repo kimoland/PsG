@@ -1,28 +1,31 @@
 #!/usr/bin/env bash
 set -e
 
-# پورت و اینترفیس‌های uvicorn
+# ۱. اضافه کردن مسیر محیط مجازی پایتون
+export PATH="/code/.venv/bin:$PATH"
+
+# ۲. پورت و آدرس پروکسی برای Railway
 export UVICORN_HOST="0.0.0.0"
 export UVICORN_PORT="${PORT:-8000}"
-
-# دیتابیس پیش‌فرض sqlite
 export SQLALCHEMY_DATABASE_URL="${SQLALCHEMY_DATABASE_URL:-sqlite+aiosqlite:///db.sqlite3}"
 export ROLE="${ROLE:-all-in-one}"
-
-# هدرهای پروکسی برای تشخیص HTTPS در Railway
-export UVICORN_PROXY_HEADERS="${UVICORN_PROXY_HEADERS:-true}"
-export UVICORN_FORWARDED_ALLOW_IPS="${UVICORN_FORWARDED_ALLOW_IPS:-*}"
+export UVICORN_PROXY_HEADERS="true"
+export UVICORN_FORWARDED_ALLOW_IPS="*"
 
 echo "Starting PasarGuard panel on port ${UVICORN_PORT}..."
 
-# 1. مایگریشن دیتابیس
+# ۳. اصلاح اتوماتیک main.py جهت لیسن کردن روی 0.0.0.0 به جای localhost
+sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /code/main.py || true
+
+# ۴. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# 2. ساخت فیزیکی ادمین در دیتابیس توسط CLI رسمی پاسارگاد (بدون نیاز به DEBUG)
+# ۵. ساخت ادمین در دیتابیس SQLite توسط CLI پاسارگاد
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Creating admin '${SUDO_USERNAME}' via PasarGuard CLI..."
-    pasarguard cli admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || true
+    pasarguard admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || \
+    python -m app.cli admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || true
 fi
 
-# 3. اجرای پنل
+# ۶. اجرای سرویس اصلی در حالت Production
 exec /code/start.sh
