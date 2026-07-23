@@ -17,13 +17,12 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. ساخت فیزیکی و تضمینی ادمین Sudo در دیتابیس SQLite با سورس پایتون
+# ۳. ساخت فیزیکی و مستقیم ادمین Sudo در دیتابیس SQLite
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
     echo "Ensuring sudo admin '${SUDO_USERNAME}' exists in database..."
     python -c "
 import asyncio
 import os
-import inspect
 
 async def main():
     username = os.environ.get('SUDO_USERNAME', 'admin')
@@ -34,37 +33,34 @@ async def main():
     except ImportError:
         from app.db import GetDB
 
-    from app.db.crud import admin as admin_crud
+    from app.db.models import Admin
 
-    AdminClass = None
-    for mod_path in ['app.schemas.admin', 'app.schemas', 'app.db.schemas.admin', 'app.db.schemas', 'app.db.models', 'app.models']:
+    get_password_hash = None
+    for mod in ['app.security', 'app.core.security', 'app.db.security']:
         try:
-            m = __import__(mod_path, fromlist=['AdminCreate', 'Admin'])
-            AdminClass = getattr(m, 'AdminCreate', None) or getattr(m, 'Admin', None)
-            if AdminClass:
-                print(f'Found AdminClass in {mod_path}')
+            m = __import__(mod, fromlist=['get_password_hash'])
+            get_password_hash = getattr(m, 'get_password_hash', None)
+            if get_password_hash:
                 break
         except Exception:
             pass
 
     async with GetDB() as db:
         try:
-            existing = await admin_crud.get_admin(db, username=username)
+            from app.db.crud.admin import get_admin
+            existing = await get_admin(db, username=username)
             if existing:
                 print(f'Admin {username} already exists in database.')
                 return
-        except Exception as e:
-            print('Check admin:', e)
+        except Exception:
+            pass
 
         try:
-            if AdminClass:
-                try:
-                    admin_in = AdminClass(username=username, password=password, is_sudo=True)
-                except Exception:
-                    admin_in = AdminClass(username=username, password=password)
-                await admin_crud.create_admin(db, admin_in)
-                print(f'Admin {username} successfully inserted into database!')
-                return
+            hashed = get_password_hash(password) if get_password_hash else password
+            admin_obj = Admin(username=username, hashed_password=hashed, is_sudo=True)
+            db.add(admin_obj)
+            await db.commit()
+            print(f'Admin {username} successfully created and saved in database!')
         except Exception as e:
             print('Create admin error:', e)
 
