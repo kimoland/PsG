@@ -17,9 +17,9 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. همگام‌سازی و ساخت مستقیم ادمین Sudo در دیتابیس SQLite با هش Async نیتیو
+# ۳. همگام‌سازی و اعطای دسترسی کامل Owner/Sudo به ادمین اصلی
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
-    echo "Ensuring sudo admin '${SUDO_USERNAME}' password is synced in database..."
+    echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full Owner permissions..."
     python -c "
 import asyncio
 import os
@@ -45,7 +45,6 @@ async def main():
             for attr in ['hash_password', 'get_password_hash', 'get_password_hash_func']:
                 if hasattr(mod, attr) and callable(getattr(mod, attr)):
                     get_password_hash = getattr(mod, attr)
-                    print(f'Found {attr} in {modname}')
                     break
             if get_password_hash:
                 break
@@ -53,7 +52,6 @@ async def main():
             pass
 
     if not get_password_hash:
-        print('Using fallback password hashing')
         try:
             from pwdlib import PasswordHash
             pwd_context = PasswordHash.recommended()
@@ -67,31 +65,33 @@ async def main():
     else:
         hashed = get_password_hash(password)
 
+    def apply_owner_permissions(obj):
+        for attr in ['sudo', 'is_sudo', 'is_owner', 'is_superuser']:
+            if hasattr(obj, attr):
+                setattr(obj, attr, True)
+        if hasattr(obj, 'role_id'):
+            setattr(obj, 'role_id', None)
+
     async with GetDB() as db:
         try:
             from app.db.crud.admin import get_admin
             existing = await get_admin(db, username=username)
             if existing:
                 existing.hashed_password = hashed
+                apply_owner_permissions(existing)
                 db.add(existing)
                 await db.commit()
-                print(f'Admin {username} password successfully updated in database!')
+                print(f'Admin {username} updated with full Owner permissions!')
                 return
         except Exception as e:
-            print('Check admin existing note:', e)
+            print('Check existing admin:', e)
 
         try:
-            try:
-                admin_obj = Admin(username=username, hashed_password=hashed, sudo=True)
-            except Exception:
-                try:
-                    admin_obj = Admin(username=username, hashed_password=hashed, is_sudo=True)
-                except Exception:
-                    admin_obj = Admin(username=username, hashed_password=hashed)
-
+            admin_obj = Admin(username=username, hashed_password=hashed)
+            apply_owner_permissions(admin_obj)
             db.add(admin_obj)
             await db.commit()
-            print(f'Admin {username} successfully created and saved in database!')
+            print(f'Admin {username} created with full Owner permissions!')
         except Exception as e:
             print('Create admin error:', e)
 
