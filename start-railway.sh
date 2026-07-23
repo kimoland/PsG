@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-export PATH="/code/.venv/bin:$PATH"
-
 export UVICORN_HOST="0.0.0.0"
 export UVICORN_PORT="${PORT:-8000}"
 export SQLALCHEMY_DATABASE_URL="${SQLALCHEMY_DATABASE_URL:-sqlite+aiosqlite:///db.sqlite3}"
@@ -17,9 +15,8 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 python -m alembic upgrade head || true
 
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
-    echo "Creating admin '${SUDO_USERNAME}' via PasarGuard CLI..."
-    pasarguard admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || \
-    python -m app.cli admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || true
+    echo "Creating admin '${SUDO_USERNAME}' via pasarguard-cli.py..."
+    python /code/pasarguard-cli.py admin create --username "$SUDO_USERNAME" --password "$SUDO_PASSWORD" --sudo || true
 fi
 
 exec /code/start.sh
