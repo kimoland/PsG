@@ -17,9 +17,9 @@ sed -i 's/bind_args\["host"\] = ip/bind_args["host"] = server_settings.host/' /c
 # ۲. مایگریشن دیتابیس
 python -m alembic upgrade head || true
 
-# ۳. اعطای دسترسی کامل Owner با تنظیم permission_overrides = '["*"]'
+# ۳. اعطای دسترسی کامل و همگام‌سازی فیلدها
 if [ -n "${SUDO_USERNAME:-}" ] && [ -n "${SUDO_PASSWORD:-}" ]; then
-    echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full Owner permissions..."
+    echo "Ensuring sudo admin '${SUDO_USERNAME}' exists with full permissions..."
     python -c "
 import asyncio
 import os
@@ -80,15 +80,15 @@ async def main():
                 db.add(admin)
                 await db.commit()
 
-            # ست کردن دسترسی مالکیت کامل با فرمت معتبر JSON
+            # تنظیم فیلدها با فرمت استاندارد نیتیو
             await db.execute(
-                text('UPDATE admins SET role_id = 1, permission_overrides = \'[\"*\"]\' WHERE username = :u'),
+                text('UPDATE admins SET role_id = 1, permission_overrides = NULL WHERE username = :u'),
                 {'u': username}
             )
             await db.commit()
-            print(f'Admin {username} role and permissions successfully set to Owner!')
+            print(f'Admin {username} successfully initialized!')
         except Exception as e:
-            print('Admin permission error:', e)
+            print('Admin initialization error:', e)
 
 asyncio.run(main())
 " || true
